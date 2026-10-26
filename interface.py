@@ -29,9 +29,9 @@ TELEMETRY = RUNTIME / "joints.json"
 
 
 def joint_ranges(anchor):
-    if not anchor:
-        return None
     from teleop_trial import LIMITS
+    if not anchor:
+        return {"leader": None, "piper": LIMITS}
     mapping = json.loads(MAPPING.read_text())
     offset = float(mapping["max_offset_deg"])
     gains = mapping["joint_slopes"]
@@ -277,7 +277,7 @@ class Controller:
                 except (OSError, ValueError):
                     self.result = "起点文件损坏；请重新记录"
             lines = tail(self.log_path)
-            ranges = joint_ranges(data) if anchor else None
+            ranges = joint_ranges(data if anchor else None)
             return {
                 "busy": self.process is not None,
                 "kind": self.kind,
