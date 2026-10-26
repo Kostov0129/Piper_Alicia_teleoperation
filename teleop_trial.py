@@ -10,6 +10,15 @@ import math
 import time
 from pathlib import Path
 
+
+def publish_joints(path, leader, piper):
+    if path is None:
+        return
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps({"timestamp": time.time(), "leader": leader,
+                                     "piper": piper}))
+    temporary.replace(path)
+
 SIGNS = (1, -1, -1, -1, -1, -1)
 # Conservative intersection of the installed SDK limits and the official demo.
 LIMITS = ((-145, 145), (5, 175), (-165, -5), (-95, 95), (-65, 65), (-95, 95))
@@ -81,6 +90,7 @@ def main():
     ap.add_argument("--shoulder-gain", type=float, default=GAIN,
                     help="J2 angle mapping; 0.5 default, up to 1.0 for a bounded reach test")
     ap.add_argument("--mapping", type=Path, help="Experimental six-axis mapping JSON")
+    ap.add_argument("--telemetry-file", type=Path, help="Current joint feedback for the local interface")
     args = ap.parse_args()
     if not 1 <= args.seconds <= 90:
         ap.error("试验时长必须为 1–90 秒")
@@ -140,6 +150,7 @@ def main():
                 raise RuntimeError(f"PiPER J{i+1} 偏离起点超过 2°，请重记起点")
             if abs(lead[i] - anchor["leader_joints_deg"][i]) > 3.0:
                 raise RuntimeError(f"Alicia J{i+1} 偏离起点超过 3°，请重记起点")
+        publish_joints(args.telemetry_file, lead, actual)
         status = piper.GetArmStatus()
         if status.time_stamp <= 0 or time.time() - status.time_stamp > 0.5 or status.arm_status.arm_status != 0:
             raise RuntimeError(f"PiPER 状态异常：{status.arm_status}")
@@ -182,6 +193,7 @@ def main():
             else:
                 lead = read_leader(leader)
             actual = read_piper(piper)
+            publish_joints(args.telemetry_file, lead, actual)
             target = mapped_target(lead, anchor, args.shoulder_gain,
                                    joint_gains, max_offset_deg)
             validate_target(target, anchor, max_offset_deg)

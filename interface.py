@@ -7,6 +7,7 @@ existing read-only anchor capture and guarded teleop controller as children.
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import secrets
@@ -24,6 +25,39 @@ RUNTIME = ROOT / "runtime"
 ANCHOR = RUNTIME / "current_anchor.json"
 MAPPING = ROOT / "matched_pose_trial_mapping_wider.json"
 HTML = ROOT / "index.html"
+TELEMETRY = RUNTIME / "joints.json"
+
+
+def joint_ranges(anchor):
+    if not anchor:
+        return None
+    from teleop_trial import LIMITS
+    mapping = json.loads(MAPPING.read_text())
+    offset = float(mapping["max_offset_deg"])
+    gains = mapping["joint_slopes"]
+    piper = []
+    leader = []
+    for i, (center, gain) in enumerate(zip(anchor["piper_joints_deg"], gains)):
+        low = max(LIMITS[i][0], center - offset)
+        high = min(LIMITS[i][1], center + offset)
+        piper.append([low, high])
+        values = [anchor["leader_joints_deg"][i] + (bound - center) / gain
+                  for bound in (low, high)]
+        leader.append([min(values), max(values)])
+    return {"leader": leader, "piper": piper}
+
+
+def read_telemetry():
+    try:
+        data = json.loads(TELEMETRY.read_text())
+        if time.time() - data["timestamp"] > 1.5:
+            return None
+        if any(len(data[name]) != 6 or not all(math.isfinite(x) for x in data[name])
+               for name in ("leader", "piper")):
+            return None
+        return data
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
 
 
 def tail(path: Path, limit=36):
@@ -54,6 +88,37 @@ class Controller:
         self.gripper = True
         self.connections = {"leader": None, "piper": None}
         self.checked_at = {"leader": None, "piper": None}
+        self.monitor = None
+        self.monitor_retry_after = 0.0
+        self.port = "/dev/ttyACM0"
+        self.can = "can0"
+
+    def _stop_monitor(self):
+        if self.monitor and self.monitor.poll() is None:
+            os.killpg(self.monitor.pid, signal.SIGINT)
+            try:
+                self.monitor.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                os.killpg(self.monitor.pid, signal.SIGTERM)
+                self.monitor.wait(timeout=2)
+        self.monitor = None
+        TELEMETRY.unlink(missing_ok=True)
+
+    def _ensure_monitor(self):
+        if self.process is not None or not all(self.connections.values()):
+            return
+        if self.monitor and self.monitor.poll() is None:
+            return
+        if time.monotonic() < self.monitor_retry_after:
+            return
+        self.monitor_retry_after = time.monotonic() + 8
+        with (RUNTIME / "joint-monitor.log").open("ab") as log:
+            self.monitor = subprocess.Popen(
+                [sys.executable, "joint_monitor.py", "--port", self.port,
+                 "--can", self.can, "--output", str(TELEMETRY)],
+                cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
 
     def _finish(self):
         if self.process is None or self.process.poll() is None:
@@ -68,14 +133,24 @@ class Controller:
             self.checked_at[device] = time.strftime("%H:%M:%S")
             self.result = ("Alicia" if device == "leader" else "PiPER") + (
                 " 连接与反馈正常" if code == 0 else " 检测未通过；查看日志")
-        elif self.kind == "capture" and code == 0:
+        elif self.kind in ("capture", "prepare_capture") and code == 0:
             pending = RUNTIME / "anchor_pending.json"
-            if pending.exists():
-                pending.replace(ANCHOR)
+            if not pending.exists():
+                self.result = "起点记录未生成；查看运行记录"
+                self.process = None
+                self.kind = "idle"
+                return
+            pending.replace(ANCHOR)
             self.preview_fingerprint = None
             self.connections = {"leader": True, "piper": True}
             self.checked_at = {"leader": time.strftime("%H:%M:%S"),
                                "piper": time.strftime("%H:%M:%S")}
+            if self.kind == "prepare_capture":
+                self.process = None
+                self.kind = "idle"
+                self._launch("preview", self._preview_command(self.gripper), self.gripper)
+                self.result = "起点已记录，正在只读检查"
+                return
             self.result = "软件起点已保存；下一步做只读预检"
         elif self.kind == "preview" and code == 0:
             self.preview_fingerprint = fingerprint(self.gripper)
@@ -89,11 +164,13 @@ class Controller:
             self.result = f"{self.kind} 未完成（退出码 {code}）；查看下方日志"
         self.process = None
         self.kind = "idle"
+        TELEMETRY.unlink(missing_ok=True)
 
     def _launch(self, kind: str, command, gripper=True):
         self._finish()
         if self.process is not None:
             raise ValueError("已有操作正在运行；请先等待或停止")
+        self._stop_monitor()
         stamp = time.strftime("%Y%m%d-%H%M%S")
         self.log_path = RUNTIME / f"{stamp}-{kind}.log"
         self.log_handle = self.log_path.open("wb")
@@ -108,18 +185,27 @@ class Controller:
         self.gripper = gripper
         self.result = f"{kind} 运行中"
 
+    @staticmethod
+    def _preview_command(gripper):
+        command = ["teleop_trial.py", "--anchor", str(ANCHOR), "--mapping",
+                   str(MAPPING), "--seconds", "2", "--telemetry-file", str(TELEMETRY)]
+        if gripper:
+            command.append("--with-gripper")
+        return command
+
     def start(self, kind, body):
         with self.lock:
             self._finish()
             if self.process is not None:
                 raise ValueError("已有操作正在运行")
-            if kind in ("capture", "detect_leader", "detect_piper"):
+            if kind in ("capture", "prepare", "detect_leader", "detect_piper"):
                 port = body.get("port", "/dev/ttyACM0")
                 can = body.get("can", "can0")
                 if not re.fullmatch(r"/dev/tty(?:ACM|USB)[0-9]{1,3}", port):
                     raise ValueError("串口格式应为 /dev/ttyACM0 或 /dev/ttyUSB0")
                 if not re.fullmatch(r"can[0-9]{1,2}", can):
                     raise ValueError("CAN 名称应为 can0 等")
+                self.port, self.can = port, can
                 if kind == "detect_leader":
                     self._launch(kind, ["probe.py", "leader", "--port", port,
                                         "--seconds", "1"])
@@ -129,8 +215,15 @@ class Controller:
                                         "--protocol", "v2", "--seconds", "1"])
                     return
                 self.preview_fingerprint = None
-                self._launch("capture", ["capture_pair_anchor.py", "--leader-port", port,
-                                        "--can", can, "--output", str(RUNTIME / "anchor_pending.json")])
+                gripper = body.get("gripper", True)
+                if not isinstance(gripper, bool):
+                    raise ValueError("夹爪选项无效")
+                if kind == "prepare" and not all(self.connections.values()):
+                    raise ValueError("请先检测两臂连接")
+                (RUNTIME / "anchor_pending.json").unlink(missing_ok=True)
+                self._launch("prepare_capture" if kind == "prepare" else "capture",
+                             ["capture_pair_anchor.py", "--leader-port", port,
+                              "--can", can, "--output", str(RUNTIME / "anchor_pending.json")], gripper)
                 return
             if kind not in ("preview", "live"):
                 raise ValueError("未知操作")
@@ -153,7 +246,7 @@ class Controller:
             else:
                 seconds = 2
             command = ["teleop_trial.py", "--anchor", str(ANCHOR), "--mapping", str(MAPPING),
-                       "--seconds", str(seconds)]
+                       "--seconds", str(seconds), "--telemetry-file", str(TELEMETRY)]
             if gripper:
                 command.append("--with-gripper")
             if kind == "live":
@@ -171,6 +264,7 @@ class Controller:
     def status(self):
         with self.lock:
             self._finish()
+            self._ensure_monitor()
             anchor = None
             if ANCHOR.exists():
                 try:
@@ -183,7 +277,7 @@ class Controller:
                 except (OSError, ValueError):
                     self.result = "起点文件损坏；请重新记录"
             lines = tail(self.log_path)
-            telemetry = next((line for line in reversed(lines) if line.startswith("Alicia [")), "")
+            ranges = joint_ranges(data) if anchor else None
             return {
                 "busy": self.process is not None,
                 "kind": self.kind,
@@ -191,8 +285,10 @@ class Controller:
                 "anchor": anchor,
                 "connections": self.connections.copy(),
                 "checked_at": self.checked_at.copy(),
-                "preview_ready": bool(self.preview_fingerprint),
-                "telemetry": telemetry,
+                "preview_ready": bool(self.preview_fingerprint and
+                                      time.monotonic() - self.preview_time <= 120),
+                "telemetry": read_telemetry(),
+                "joint_ranges": ranges,
                 "log": lines,
                 "log_file": str(self.log_path) if self.log_path else None,
             }
@@ -232,7 +328,7 @@ def make_handler(controller, token):
             if not self._local_host() or self.headers.get("X-Local-Token") != token:
                 return self._json(403, {"error": "本机请求验证失败"})
             path = urlsplit(self.path).path
-            if path not in ("/api/capture", "/api/detect_leader", "/api/detect_piper",
+            if path not in ("/api/capture", "/api/prepare", "/api/detect_leader", "/api/detect_piper",
                             "/api/preview", "/api/live", "/api/stop"):
                 return self._json(404, {"error": "未知操作"})
             try:
@@ -273,6 +369,7 @@ def main():
         print("界面已退出", flush=True)
     finally:
         controller.stop()
+        controller._stop_monitor()
         if controller.process:
             try:
                 controller.process.wait(timeout=5)
