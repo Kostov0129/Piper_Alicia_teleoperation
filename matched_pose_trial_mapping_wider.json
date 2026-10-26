@@ -1,0 +1,20 @@
+{
+  "description": "六组人工姿态的试验映射；J2达到旧版20°边界后的扩大行程动态复测，未独立验证",
+  "source": "matched_pose_pairs.json",
+  "fit_report": "matched_pose_fit.json",
+  "captured_pose_count": 6,
+  "joint_slopes": [
+    1.104,
+    -0.9169,
+    -1.0346,
+    -1.1647,
+    -0.5666,
+    -1.1515
+  ],
+  "max_offset_deg": 40.0,
+  "max_rate_deg_s": 45.0,
+  "speed_percent": 100,
+  "deployment_state": "experimental_bounded_trial",
+  "validation_passed": false,
+  "source_mapping": "matched_pose_trial_mapping.json"
+}

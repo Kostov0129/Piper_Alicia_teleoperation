@@ -1,0 +1,2 @@
+alicia-d-sdk==6.1.0
+piper-sdk==0.6.2

@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+runtime/
+*.log
+*anchor*.json
+*pairs*.json
+*fit*.json
+*.tar.gz
