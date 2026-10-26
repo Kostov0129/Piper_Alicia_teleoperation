@@ -148,6 +148,8 @@
         <h2>遥操控制</h2>
         <p class="intro subtle">两臂摆好并停稳后，点击“准备遥操”。</p>
         <label class="option"><input id="gripper" type="checkbox" checked>同时控制夹爪</label>
+        <label class="option"><input id="extended" type="checkbox">扩展 J2/J3 行程</label>
+        <p class="subtle" style="margin: -7px 0 0 24px">J2 起点 ±90°、J3 起点 ±120°；仍受绝对限位约束。启用后需重新准备。</p>
         <label class="option"><input id="confirmed" type="checkbox">现场有人监护，手边有实体急停</label>
         <div class="actions">
           <button id="prepare" class="secondary">准备遥操</button>
@@ -269,15 +271,16 @@
       $("detect_leader").disabled = data.busy;
       $("detect_piper").disabled = data.busy;
       $("prepare").disabled = data.busy || !data.connections?.leader || !data.connections?.piper;
-      $("live").disabled = data.busy || !data.preview_ready || !data.connections?.leader || !data.connections?.piper;
+      $("live").disabled = data.busy || !data.preview_ready || !data.connections?.leader || !data.connections?.piper || $("extended").checked !== data.extended || $("gripper").checked !== data.gripper;
       $("stop").disabled = !data.busy;
     }
     $("detect_leader").onclick = () => action("detect_leader", {port: $("port").value.trim(), can: $("can").value.trim()});
     $("detect_piper").onclick = () => action("detect_piper", {port: $("port").value.trim(), can: $("can").value.trim()});
-    $("prepare").onclick = () => action("prepare", {port: $("port").value.trim(), can: $("can").value.trim(), gripper: $("gripper").checked});
-    $("live").onclick = () => action("live", {gripper: $("gripper").checked, seconds: Number($("seconds").value), confirmed: $("confirmed").checked});
+    $("prepare").onclick = () => action("prepare", {port: $("port").value.trim(), can: $("can").value.trim(), gripper: $("gripper").checked, extended: $("extended").checked});
+    $("live").onclick = () => action("live", {gripper: $("gripper").checked, extended: $("extended").checked, seconds: Number($("seconds").value), confirmed: $("confirmed").checked});
     $("stop").onclick = () => action("stop");
     $("gripper").onchange = () => { $("message").textContent = "夹爪选项已改变，请重新准备遥操"; };
+    $("extended").onchange = () => { $("message").textContent = "行程选项已改变，请重新准备遥操"; $("live").disabled = true; };
     async function poll() {
       try {
         const response = await fetch("/api/status", {cache: "no-store"});

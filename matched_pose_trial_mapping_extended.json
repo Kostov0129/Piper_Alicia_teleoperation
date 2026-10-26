@@ -1,0 +1,11 @@
+{
+  "description": "用户可选的 J2/J3 扩展试验行程；依据已观察到的 ±40° 截断，仅扩大这两轴；其余控制与绝对保守限位保持不变",
+  "source_mapping": "matched_pose_trial_mapping_wider.json",
+  "joint_slopes": [1.104, -0.9169, -1.0346, -1.1647, -0.5666, -1.1515],
+  "max_offset_deg": 40.0,
+  "joint_offsets_deg": [40.0, 90.0, 120.0, 40.0, 40.0, 40.0],
+  "max_rate_deg_s": 45.0,
+  "speed_percent": 100,
+  "deployment_state": "opt_in_extended_trial",
+  "validation_passed": false
+}

@@ -24,22 +24,23 @@ ROOT = Path(__file__).resolve().parent
 RUNTIME = ROOT / "runtime"
 ANCHOR = RUNTIME / "current_anchor.json"
 MAPPING = ROOT / "matched_pose_trial_mapping_wider.json"
+MAPPING_EXTENDED = ROOT / "matched_pose_trial_mapping_extended.json"
 HTML = ROOT / "index.html"
 TELEMETRY = RUNTIME / "joints.json"
 
 
-def joint_ranges(anchor):
+def joint_ranges(anchor, mapping_path=MAPPING):
     from teleop_trial import LIMITS
     if not anchor:
         return {"leader": None, "piper": LIMITS}
-    mapping = json.loads(MAPPING.read_text())
-    offset = float(mapping["max_offset_deg"])
+    mapping = json.loads(mapping_path.read_text())
+    offsets = mapping.get("joint_offsets_deg", [float(mapping["max_offset_deg"])] * 6)
     gains = mapping["joint_slopes"]
     piper = []
     leader = []
     for i, (center, gain) in enumerate(zip(anchor["piper_joints_deg"], gains)):
-        low = max(LIMITS[i][0], center - offset)
-        high = min(LIMITS[i][1], center + offset)
+        low = max(LIMITS[i][0], center - offsets[i])
+        high = min(LIMITS[i][1], center + offsets[i])
         piper.append([low, high])
         values = [anchor["leader_joints_deg"][i] + (bound - center) / gain
                   for bound in (low, high)]
@@ -67,10 +68,10 @@ def tail(path: Path, limit=36):
     return path.read_text(errors="replace").splitlines()[-limit:]
 
 
-def fingerprint(gripper: bool):
+def fingerprint(gripper: bool, mapping_path=MAPPING):
     if not ANCHOR.exists():
         raise ValueError("请先记录当前软件起点")
-    data = ANCHOR.read_bytes() + MAPPING.read_bytes() + bytes([gripper])
+    data = ANCHOR.read_bytes() + mapping_path.read_bytes() + bytes([gripper])
     return hashlib.sha256(data).hexdigest()
 
 
@@ -86,6 +87,8 @@ class Controller:
         self.preview_fingerprint = None
         self.preview_time = 0.0
         self.gripper = True
+        self.extended = False
+        self.mapping = MAPPING
         self.connections = {"leader": None, "piper": None}
         self.checked_at = {"leader": None, "piper": None}
         self.monitor = None
@@ -153,7 +156,7 @@ class Controller:
                 return
             self.result = "软件起点已保存；下一步做只读预检"
         elif self.kind == "preview" and code == 0:
-            self.preview_fingerprint = fingerprint(self.gripper)
+            self.preview_fingerprint = fingerprint(self.gripper, self.mapping)
             self.preview_time = time.monotonic()
             self.result = "只读预检通过；可以启动有界遥操"
         elif self.kind == "live" and code == 0:
@@ -185,10 +188,9 @@ class Controller:
         self.gripper = gripper
         self.result = f"{kind} 运行中"
 
-    @staticmethod
-    def _preview_command(gripper):
+    def _preview_command(self, gripper):
         command = ["teleop_trial.py", "--anchor", str(ANCHOR), "--mapping",
-                   str(MAPPING), "--seconds", "2", "--telemetry-file", str(TELEMETRY)]
+                   str(self.mapping), "--seconds", "2", "--telemetry-file", str(TELEMETRY)]
         if gripper:
             command.append("--with-gripper")
         return command
@@ -220,6 +222,12 @@ class Controller:
                     raise ValueError("夹爪选项无效")
                 if kind == "prepare" and not all(self.connections.values()):
                     raise ValueError("请先检测两臂连接")
+                if kind == "prepare":
+                    extended = body.get("extended", False)
+                    if not isinstance(extended, bool):
+                        raise ValueError("扩展行程选项无效")
+                    self.extended = extended
+                    self.mapping = MAPPING_EXTENDED if extended else MAPPING
                 (RUNTIME / "anchor_pending.json").unlink(missing_ok=True)
                 self._launch("prepare_capture" if kind == "prepare" else "capture",
                              ["capture_pair_anchor.py", "--leader-port", port,
@@ -230,7 +238,9 @@ class Controller:
             gripper = body.get("gripper", True)
             if not isinstance(gripper, bool):
                 raise ValueError("夹爪选项无效")
-            key = fingerprint(gripper)
+            if kind == "live" and body.get("extended", False) != self.extended:
+                raise ValueError("行程选项已改变，请重新准备遥操")
+            key = fingerprint(gripper, self.mapping)
             if kind == "live":
                 if not all(self.connections.values()):
                     raise ValueError("请先分别检测 Alicia 和 PiPER 连接")
@@ -245,7 +255,7 @@ class Controller:
                 self.preview_fingerprint = None
             else:
                 seconds = 2
-            command = ["teleop_trial.py", "--anchor", str(ANCHOR), "--mapping", str(MAPPING),
+            command = ["teleop_trial.py", "--anchor", str(ANCHOR), "--mapping", str(self.mapping),
                        "--seconds", str(seconds), "--telemetry-file", str(TELEMETRY)]
             if gripper:
                 command.append("--with-gripper")
@@ -277,7 +287,7 @@ class Controller:
                 except (OSError, ValueError):
                     self.result = "起点文件损坏；请重新记录"
             lines = tail(self.log_path)
-            ranges = joint_ranges(data if anchor else None)
+            ranges = joint_ranges(data if anchor else None, self.mapping)
             return {
                 "busy": self.process is not None,
                 "kind": self.kind,
@@ -287,6 +297,8 @@ class Controller:
                 "checked_at": self.checked_at.copy(),
                 "preview_ready": bool(self.preview_fingerprint and
                                       time.monotonic() - self.preview_time <= 120),
+                "extended": self.extended,
+                "gripper": self.gripper,
                 "telemetry": read_telemetry(),
                 "joint_ranges": ranges,
                 "log": lines,

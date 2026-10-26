@@ -32,6 +32,10 @@ SPEED_PERCENT = 100
 GAIN = 0.5
 
 
+def offset_for_joint(max_offset_deg, index):
+    return max_offset_deg[index] if isinstance(max_offset_deg, (list, tuple)) else max_offset_deg
+
+
 def mapped_target(leader, anchor, shoulder_gain=GAIN, joint_gains=None,
                   max_offset_deg=MAX_OFFSET_DEG):
     result = []
@@ -40,8 +44,9 @@ def mapped_target(leader, anchor, shoulder_gain=GAIN, joint_gains=None,
         gain = joint_gains[i] if joint_gains is not None else (
             SIGNS[i] * (shoulder_gain if i == 1 else GAIN))
         requested = center + gain * (leader[i] - anchor["leader_joints_deg"][i])
-        low = max(LIMITS[i][0], center - max_offset_deg)
-        high = min(LIMITS[i][1], center + max_offset_deg)
+        offset = offset_for_joint(max_offset_deg, i)
+        low = max(LIMITS[i][0], center - offset)
+        high = min(LIMITS[i][1], center + offset)
         result.append(max(low, min(high, requested)))
     return result
 
@@ -51,8 +56,9 @@ def validate_target(target, anchor, max_offset_deg=MAX_OFFSET_DEG):
         low, high = LIMITS[i]
         if not math.isfinite(value) or value < low-1e-6 or value > high+1e-6:
             raise RuntimeError(f"J{i+1} 目标 {value:.2f}° 超过保守限位 [{low}, {high}]°")
-        if abs(value - anchor["piper_joints_deg"][i]) > max_offset_deg+1e-6:
-            raise RuntimeError(f"J{i+1} 请求超过起点 ±{max_offset_deg}° 试验范围")
+        offset = offset_for_joint(max_offset_deg, i)
+        if abs(value - anchor["piper_joints_deg"][i]) > offset+1e-6:
+            raise RuntimeError(f"J{i+1} 请求超过起点 ±{offset}° 试验范围")
 
 
 def read_leader(leader):
@@ -110,9 +116,20 @@ def main():
         ):
             raise RuntimeError("标定映射的方向或比例超出试验范围")
         max_offset_deg = float(mapping["max_offset_deg"])
+        joint_offsets = mapping.get("joint_offsets_deg")
+        if joint_offsets is not None:
+            if (not isinstance(joint_offsets, list) or len(joint_offsets) != 6
+                    or any(type(x) not in (int, float) or not math.isfinite(x)
+                           or not 0 < x <= 120 for x in joint_offsets)):
+                raise RuntimeError("逐关节行程配置无效")
+            # This mode only relaxes the travel of the two joints observed hitting
+            # the trial boundary; all other joints keep the original ±40° bound.
+            if any(joint_offsets[i] != 40 for i in (0, 3, 4, 5)):
+                raise RuntimeError("扩展行程只允许调整 J2/J3")
+            max_offset_deg = joint_offsets
         max_rate_deg_s = float(mapping["max_rate_deg_s"])
         speed_percent = int(mapping["speed_percent"])
-        if not (0 < max_offset_deg <= 40 and 0 < max_rate_deg_s <= 45
+        if not (0 < float(mapping["max_offset_deg"]) <= 40 and 0 < max_rate_deg_s <= 45
                 and 1 <= speed_percent <= 100):
             raise RuntimeError("标定映射中的试验边界无效")
     if anchor["max_sample_motion_deg"] > 2:
@@ -154,7 +171,7 @@ def main():
         status = piper.GetArmStatus()
         if status.time_stamp <= 0 or time.time() - status.time_stamp > 0.5 or status.arm_status.arm_status != 0:
             raise RuntimeError(f"PiPER 状态异常：{status.arm_status}")
-        print(f"起点检查通过；关节比例 {joint_gains if joint_gains is not None else '默认 J2=' + str(args.shoulder_gain)}；目标相对起点最多 {max_offset_deg:.0f}°；速率最多 {max_rate_deg_s:.0f}°/s；PiPER 速度 {speed_percent}%", flush=True)
+        print(f"起点检查通过；关节比例 {joint_gains if joint_gains is not None else '默认 J2=' + str(args.shoulder_gain)}；目标相对起点行程 {max_offset_deg}°；速率最多 {max_rate_deg_s:.0f}°/s；PiPER 速度 {speed_percent}%", flush=True)
         if not args.live:
             print("只读预览：PiPER 不会运动", flush=True)
         else:
