@@ -1,16 +1,294 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Alicia → PiPER 遥操</title><style>
-:root{font-family:system-ui,-apple-system,"Noto Sans CJK SC",sans-serif;color:#17343b;background:#f4f8f7}*{box-sizing:border-box}body{margin:0}header{background:#0f4848;color:white;padding:24px max(20px,calc((100vw - 1000px)/2))}h1{font-size:24px;margin:0 0 4px}header p{margin:0;color:#c8e3dc}main{max-width:1000px;margin:20px auto;padding:0 16px 32px}.status{padding:14px 18px;background:#e0f4e9;border-left:5px solid #258061;border-radius:8px;margin-bottom:15px;font-weight:600}.status.busy{background:#fff1d8;border-color:#d08a29}.status.error{background:#ffeaeb;border-color:#ba4848}.card{background:white;border:1px solid #d9e5e3;border-radius:12px;padding:18px;margin-bottom:14px;box-shadow:0 3px 14px #1b3b3710}.card h2{font-size:18px;margin:0 0 10px}.muted,.small{color:#607477;font-size:13px;line-height:1.45}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0}label{font-size:14px}input[type=text],input[type=number]{border:1px solid #abc7c2;border-radius:7px;padding:8px;font:inherit}input[type=number]{width:76px}button{border:0;border-radius:8px;padding:10px 15px;font:600 14px system-ui;cursor:pointer;background:#177666;color:white}button:hover{background:#0f5d50}button:disabled{background:#b3c3bf;cursor:not-allowed}.danger{background:#bd3f46}.danger:hover{background:#9a3038}.secondary{background:#315d6c}.secondary:hover{background:#244954}.check{display:flex;gap:8px;align-items:center}.check input{width:18px;height:18px}.notice{color:#8e4e12;font-size:13px}#message{min-height:18px;color:#ad3434;font-size:14px}.connection{display:inline-flex;gap:7px;align-items:center;margin-right:15px}.options{display:flex;gap:22px;flex-wrap:wrap;margin:12px 0}.actions{display:flex;gap:10px;flex-wrap:wrap;margin:13px 0}details{margin-top:10px;color:#557174;font-size:13px}summary{cursor:pointer}details label{display:inline-flex;gap:7px;align-items:center;margin:8px 12px 0 0}.joint-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.joint-panel{border:1px solid #d9e5e3;border-radius:9px;overflow:hidden}.joint-panel h3{background:#edf5f2;margin:0;padding:10px 12px;font-size:15px}.joint-panel p{padding:0 12px}.joint-table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}.joint-table th,.joint-table td{padding:8px 11px;text-align:right;border-top:1px solid #e5eeeb;font-size:13px}.joint-table th:first-child,.joint-table td:first-child{text-align:left}.joint-table tr.limit{background:#ffe5e5;color:#a4222b;font-weight:700}.joint-table tr.limit td:last-child::after{content:"  接近限位";font-size:11px}.joint-table tr.outside{background:#ffd4d4;color:#8e1020}.joint-table tr.outside td:last-child::after{content:"  超出范围";font-size:11px}.joint-table tr.unknown{color:#819391}pre{white-space:pre-wrap;word-break:break-word;background:#112e36;color:#dbf4e9;border-radius:9px;padding:15px;max-height:270px;overflow:auto;font-size:12px}@media(max-width:700px){.joint-grid{grid-template-columns:1fr}header{padding:20px}.connection{margin:5px 0}}
-</style></head><body><header><h1>Alicia-DL → PiPER 遥操</h1><p>本机界面</p></header><main>
-<div id="status" class="status">读取状态中…</div><div id="message" role="alert"></div>
-<section class="card"><h2>连接双臂</h2><div class="row"><span class="connection"><button id="detect_leader" class="secondary">检测 Alicia</button><span id="leader_status" class="small">尚未检测</span></span><span class="connection"><button id="detect_piper" class="secondary">检测 PiPER</button><span id="piper_status" class="small">尚未检测</span></span></div><details><summary>连接设置（通常不用改）</summary><label>Alicia 串口 <input id="port" type="text" value="/dev/ttyACM0"></label><label>PiPER CAN <input id="can" type="text" value="can0"></label></details></section>
-<section class="card"><h2>遥操</h2><p class="muted">把两臂摆到对应姿态并停稳，点击“准备遥操”。程序会自动记录软件起点并做只读检查。</p><div class="options"><label class="check"><input id="gripper" type="checkbox" checked>同时控制夹爪</label><label class="check"><input id="confirmed" type="checkbox">现场有人监护，手边有实体急停</label></div><div class="actions"><button id="prepare" class="secondary">准备遥操</button><button id="live">启动遥操</button><button id="stop" class="danger">退出遥操</button></div><p id="anchor" class="small">尚未记录软件起点</p><details><summary>时长与运行记录</summary><div class="row"><label>本次时长（秒） <input id="seconds" type="number" min="5" max="90" value="30"></label></div><p class="notice">退出按钮停止软件跟随并保持当前位置，不是硬件急停。最长运行 90 秒。</p><p id="logfile" class="small"></p><pre id="log">暂无日志</pre></details></section>
-<section class="card"><h2>实时关节角度</h2><p id="joint-note" class="small">等待两臂连接与反馈。红色表示接近或超出软件可用范围。</p><div class="joint-grid"><div class="joint-panel"><h3>Alicia 示教臂</h3><p class="small">范围为本次映射到 PiPER 的有效区间，不代表 Alicia 硬件限位。</p><table class="joint-table"><thead><tr><th>关节</th><th>当前</th><th>有效范围</th></tr></thead><tbody id="leader-joints"></tbody></table></div><div class="joint-panel"><h3>PiPER</h3><p class="small">准备前显示保守限位；准备后显示起点 ±40° 与保守限位的交集。</p><table class="joint-table"><thead><tr><th>关节</th><th>当前</th><th>允许范围</th></tr></thead><tbody id="piper-joints"></tbody></table></div></div></section>
-</main><script>
-const TOKEN="__TOKEN__";let last={};const $=id=>document.getElementById(id);
-async function action(name,body={}){$("message").textContent="";try{const r=await fetch("/api/"+name,{method:"POST",headers:{"Content-Type":"application/json","X-Local-Token":TOKEN},body:JSON.stringify(body)});const d=await r.json();if(!r.ok)throw Error(d.error||"操作失败");update(d)}catch(e){$("message").textContent=e.message}}
-function renderJoints(name,d){const values=d.telemetry?.[name],ranges=d.joint_ranges?.[name];$(name+"-joints").replaceChildren(...Array.from({length:6},(_,i)=>{const row=document.createElement("tr"),v=values?.[i],r=ranges?.[i],known=Number.isFinite(v);if(!known)row.className="unknown";else if(r){if(v<r[0]||v>r[1])row.className="outside";else if(Math.min(v-r[0],r[1]-v)<=1.5)row.className="limit"}for(const value of ["J"+(i+1),known?v.toFixed(1)+"°":"—",r?r.map(x=>x.toFixed(1)+"°").join(" ~ "):"—"]){const td=document.createElement("td");td.textContent=value;row.append(td)}return row}))}
-function update(d){last=d;$("status").textContent=d.result;$("status").className="status"+(d.busy?" busy":/未完成|未通过|错误|损坏/.test(d.result)?" error":"");$("anchor").textContent=d.anchor?"起点已记录："+d.anchor.time:"尚未记录软件起点";for(const device of ["leader","piper"]){const value=d.connections?.[device];$(device+"_status").textContent=value===null?"尚未检测":value?"✓ 已连接":"✕ 未连接"}$("joint-note").textContent=d.telemetry?"每秒更新；红色表示距软件边界 ≤1.5°，或已超出范围。":"当前无新鲜反馈；角度不显示为实时值。";renderJoints("leader",d);renderJoints("piper",d);$("log").textContent=(d.log||[]).join("\n")||"暂无日志";$("logfile").textContent=d.log_file||"";$("detect_leader").disabled=d.busy;$("detect_piper").disabled=d.busy;$("prepare").disabled=d.busy||!d.connections?.leader||!d.connections?.piper;$("live").disabled=d.busy||!d.preview_ready||!d.connections?.leader||!d.connections?.piper;$("stop").disabled=!d.busy}
-$("detect_leader").onclick=()=>action("detect_leader",{port:$("port").value.trim(),can:$("can").value.trim()});$("detect_piper").onclick=()=>action("detect_piper",{port:$("port").value.trim(),can:$("can").value.trim()});$("prepare").onclick=()=>action("prepare",{port:$("port").value.trim(),can:$("can").value.trim(),gripper:$("gripper").checked});$("live").onclick=()=>action("live",{gripper:$("gripper").checked,seconds:Number($("seconds").value),confirmed:$("confirmed").checked});$("stop").onclick=()=>action("stop");$("gripper").onchange=()=>{$("message").textContent="夹爪选项已改变，请重新准备遥操"};
-async function poll(){try{const r=await fetch("/api/status",{cache:"no-store"});if(r.ok)update(await r.json())}catch(e){$("status").textContent="界面连接中断；请检查运行终端与实体急停";$("status").className="status error"}}poll();setInterval(poll,1000);
-</script></body></html>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Alicia → PiPER 遥操</title>
+  <style>
+    :root {
+      font-family: system-ui, -apple-system, "Noto Sans CJK SC", sans-serif;
+      color: #17243b;
+      background: #f4f6fb;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    header {
+      color: #fff;
+      background: linear-gradient(115deg, #142746, #244777 58%, #267b83);
+      padding: 22px max(20px, calc((100vw - 1200px) / 2));
+    }
+    h1 { font-size: 24px; letter-spacing: -.02em; margin: 0 0 4px; }
+    header p { margin: 0; color: #c8dbee; font-size: 13px; }
+    main { max-width: 1200px; margin: 16px auto; padding: 0 16px 28px; }
+    .card {
+      background: #fff;
+      border: 1px solid #e3e9f1;
+      border-radius: 16px;
+      box-shadow: 0 6px 25px #273a6010;
+    }
+    .status {
+      display: flex; align-items: center; gap: 10px;
+      background: #e9f7f1; color: #146451;
+      border: 1px solid #cae9dc; border-radius: 12px;
+      padding: 11px 15px; margin-bottom: 12px; font-weight: 650;
+    }
+    .status::before { content: ""; flex: none; width: 9px; height: 9px; background: #27a57b; border-radius: 50%; }
+    .status.busy { background: #fff6e9; color: #9b5e19; border-color: #f1dfbe; }
+    .status.busy::before { background: #e3a047; }
+    .status.error { background: #fff0f0; color: #ad3541; border-color: #f3d1d4; }
+    .status.error::before { background: #dc5762; }
+    #message { color: #ad3541; font-size: 13px; min-height: 0; margin: 0 0 10px; }
+    #message:empty { display: none; }
+    h2 { margin: 0; font-size: 17px; letter-spacing: -.01em; }
+    h3 { margin: 0; font-size: 15px; }
+    .subtle { color: #65758b; font-size: 12px; line-height: 1.5; }
+    .connection-bar {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 14px; padding: 12px 16px; margin-bottom: 12px;
+    }
+    .connection-bar .left, .connection-bar .devices { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .device { display: flex; align-items: center; gap: 7px; }
+    .device span { font-size: 12px; color: #61728b; white-space: nowrap; }
+    button {
+      appearance: none; border: 0; border-radius: 9px; cursor: pointer;
+      padding: 9px 13px; font: 650 13px system-ui;
+      transition: background .15s, transform .15s, box-shadow .15s;
+    }
+    button:hover:not(:disabled) { transform: translateY(-1px); }
+    button:disabled { cursor: not-allowed; background: #e7ebf0 !important; color: #9aa6b5 !important; box-shadow: none !important; }
+    .secondary { color: #254d7f; background: #eaf2ff; }
+    .secondary:hover:not(:disabled) { background: #dceaff; }
+    .primary { color: #fff; background: #1b6d98; box-shadow: 0 5px 15px #1b6d9828; }
+    .primary:hover:not(:disabled) { background: #155b80; }
+    .stop { color: #fff; background: #c64d59; }
+    .stop:hover:not(:disabled) { background: #a93b48; }
+    .workspace { display: grid; grid-template-columns: 272px minmax(0, 1fr); gap: 12px; align-items: stretch; }
+    .control { padding: 17px; display: flex; flex-direction: column; gap: 12px; position: sticky; top: 12px; align-self: start; }
+    .control .intro { margin: 0; }
+    .control .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .control .actions button { min-height: 40px; }
+    .control .actions #prepare { grid-column: 1 / -1; }
+    .control .actions #live { background: #15856f; color: white; }
+    .control .actions #live:hover:not(:disabled) { background: #0d6e5b; }
+    .option { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; line-height: 1.35; cursor: pointer; }
+    .option input { width: 16px; height: 16px; margin: 1px 0 0; accent-color: #16836f; flex: none; }
+    .hint { margin: 0; padding: 9px 10px; background: #f5f7fa; border-radius: 8px; color: #63738a; font-size: 12px; line-height: 1.45; }
+    .control details { margin-top: auto; }
+    details { color: #62728a; font-size: 12px; }
+    summary { cursor: pointer; }
+    details label { display: flex; gap: 6px; align-items: center; margin-top: 9px; }
+    input[type=text], input[type=number] { min-width: 0; max-width: 130px; border: 1px solid #ccd7e4; border-radius: 7px; padding: 6px 8px; font: inherit; }
+    input[type=number] { max-width: 62px; }
+    #logfile { overflow-wrap: anywhere; }
+    pre { background: #16253b; color: #dcf2ec; border-radius: 8px; padding: 10px; max-height: 180px; overflow: auto; white-space: pre-wrap; word-break: break-word; font-size: 11px; }
+    .dashboard { padding: 16px; min-width: 0; }
+    .dashboard-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+    #joint-note { margin: 0; }
+    .arms { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .arm {
+      min-width: 0; border: 1px solid #e6ebf3; border-radius: 12px;
+      overflow: hidden; --accent: #5276c7; --accent-light: #e8eefc;
+    }
+    .arm.piper { --accent: #15977f; --accent-light: #e2f5ee; }
+    .arm-head { display: flex; align-items: center; gap: 8px; background: var(--accent-light); padding: 9px 11px; }
+    .arm-head::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+    .arm .explain { margin: 7px 11px 3px; min-height: 30px; }
+    .joint-list { padding: 1px 9px 8px; }
+    .joint {
+      display: grid; grid-template-columns: 25px minmax(0, 1fr) 54px; align-items: center;
+      column-gap: 9px; min-height: 54px; padding: 5px 3px; border-bottom: 1px solid #eef1f6;
+      font-variant-numeric: tabular-nums;
+    }
+    .joint:last-child { border-bottom: 0; }
+    .joint-name { color: #52647e; font-size: 12px; font-weight: 700; }
+    .joint-readout { text-align: right; font-size: 12px; font-weight: 750; color: var(--accent); white-space: nowrap; }
+    .joint-middle { min-width: 0; }
+    .track {
+      position: relative; height: 9px; border-radius: 9px;
+      background: linear-gradient(90deg, #e4eaf2, #d9e2ee 50%, #e4eaf2);
+      margin: 2px 4px 5px;
+    }
+    .track::before, .track::after {
+      content: ""; position: absolute; top: -2px; width: 2px; height: 13px;
+      border-radius: 2px; background: #b3c2d1;
+    }
+    .track::before { left: 0; } .track::after { right: 0; }
+    .dot {
+      position: absolute; z-index: 1; top: 50%; left: 50%; width: 15px; height: 15px;
+      border: 3px solid white; border-radius: 50%; background: var(--accent);
+      box-shadow: 0 1px 5px #243b5a55, 0 0 0 1px var(--accent);
+      transform: translate(-50%, -50%); transition: left .22s linear, background .15s;
+    }
+    .dot.hidden { display: none; }
+    .endpoints { display: flex; justify-content: space-between; gap: 5px; color: #8a98ab; font-size: 10px; white-space: nowrap; }
+    .joint.limit, .joint.outside { background: #fff0f1; border-radius: 7px; }
+    .joint.limit .joint-name, .joint.limit .joint-readout,
+    .joint.outside .joint-name, .joint.outside .joint-readout { color: #bf3346; }
+    .joint.limit .track, .joint.outside .track { background: #f6ccd2; }
+    .joint.limit .dot, .joint.outside .dot { background: #da4457; box-shadow: 0 1px 6px #a73e4a55, 0 0 0 1px #da4457; }
+    .joint.unknown .joint-readout { color: #99a5b4; }
+    @media(max-width: 980px) { .workspace { grid-template-columns: 220px minmax(0,1fr); } .arms { grid-template-columns: 1fr; } }
+    @media(max-width: 560px) { header { padding: 18px; } main { padding: 0 10px 20px; } .workspace { grid-template-columns: 1fr; } .connection-bar { align-items: flex-start; flex-direction: column; } .control { position: static; gap: 10px; } }
+  </style>
+</head>
+<body>
+  <header><h1>Alicia-DL → PiPER</h1><p>实时遥操与关节监看</p></header>
+  <main>
+    <div id="status" class="status">读取状态中…</div>
+    <div id="message" role="alert"></div>
+    <section class="card connection-bar" aria-label="双臂连接">
+      <div class="left"><h2>双臂连接</h2><span class="subtle">检测仅读取反馈</span></div>
+      <div class="devices">
+        <div class="device"><button id="detect_leader" class="secondary">检测 Alicia</button><span id="leader_status">尚未检测</span></div>
+        <div class="device"><button id="detect_piper" class="secondary">检测 PiPER</button><span id="piper_status">尚未检测</span></div>
+      </div>
+    </section>
+    <div class="workspace">
+      <section class="card control">
+        <h2>遥操控制</h2>
+        <p class="intro subtle">两臂摆好并停稳后，点击“准备遥操”。</p>
+        <label class="option"><input id="gripper" type="checkbox" checked>同时控制夹爪</label>
+        <label class="option"><input id="confirmed" type="checkbox">现场有人监护，手边有实体急停</label>
+        <div class="actions">
+          <button id="prepare" class="secondary">准备遥操</button>
+          <button id="live" class="primary">启动遥操</button>
+          <button id="stop" class="stop">退出遥操</button>
+        </div>
+        <p id="anchor" class="hint">尚未记录软件起点</p>
+        <p class="subtle">退出按钮停止软件跟随，不是硬件急停。</p>
+        <details><summary>设置与运行记录</summary>
+          <label>本次时长（秒） <input id="seconds" type="number" min="5" max="90" value="30"></label>
+          <label>Alicia 串口 <input id="port" type="text" value="/dev/ttyACM0"></label>
+          <label>PiPER CAN <input id="can" type="text" value="can0"></label>
+          <p id="logfile" class="subtle"></p><pre id="log">暂无日志</pre>
+        </details>
+      </section>
+      <section class="card dashboard">
+        <div class="dashboard-head"><h2>关节状态</h2><p id="joint-note" class="subtle">等待实时反馈</p></div>
+        <div class="arms">
+          <div class="arm leader"><div class="arm-head"><h3>Alicia 示教臂</h3></div>
+            <p class="explain subtle">软件映射范围；并非 Alicia 硬件限位</p>
+            <div id="leader-joints" class="joint-list"></div>
+          </div>
+          <div class="arm piper"><div class="arm-head"><h3>PiPER</h3></div>
+            <p class="explain subtle">准备前为保守限位；准备后为本次可用范围</p>
+            <div id="piper-joints" class="joint-list"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+  <script>
+    const TOKEN = "__TOKEN__";
+    const $ = id => document.getElementById(id);
+    const jointRows = {};
+    for (const arm of ["leader", "piper"]) {
+      jointRows[arm] = Array.from({length: 6}, (_, i) => {
+        const row = document.createElement("div");
+        row.className = "joint unknown";
+        const name = document.createElement("span");
+        name.className = "joint-name";
+        name.textContent = "J" + (i + 1);
+        const middle = document.createElement("div");
+        middle.className = "joint-middle";
+        const track = document.createElement("div");
+        track.className = "track";
+        const dot = document.createElement("span");
+        dot.className = "dot hidden";
+        track.append(dot);
+        const endpoints = document.createElement("div");
+        endpoints.className = "endpoints";
+        const low = document.createElement("span");
+        const high = document.createElement("span");
+        endpoints.append(low, high);
+        middle.append(track, endpoints);
+        const value = document.createElement("span");
+        value.className = "joint-readout";
+        value.textContent = "—";
+        row.append(name, middle, value);
+        $(arm + "-joints").append(row);
+        return {row, track, dot, low, high, value};
+      });
+    }
+    async function action(name, body = {}) {
+      $("message").textContent = "";
+      try {
+        const response = await fetch("/api/" + name, {
+          method: "POST",
+          headers: {"Content-Type": "application/json", "X-Local-Token": TOKEN},
+          body: JSON.stringify(body)
+        });
+        const data = await response.json();
+        if (!response.ok) throw Error(data.error || "操作失败");
+        update(data);
+      } catch (error) { $("message").textContent = error.message; }
+    }
+    function renderJoints(arm, data) {
+      const values = data.telemetry?.[arm];
+      const ranges = data.joint_ranges?.[arm];
+      jointRows[arm].forEach((item, i) => {
+        const angle = values?.[i], range = ranges?.[i];
+        const known = Number.isFinite(angle);
+        item.value.textContent = known ? angle.toFixed(1) + "°" : "—";
+        item.low.textContent = range ? range[0].toFixed(1) + "°" : "—";
+        item.high.textContent = range ? range[1].toFixed(1) + "°" : "—";
+        item.dot.classList.toggle("hidden", !known || !range);
+        let severity = "";
+        if (known && range) {
+          const [min, max] = range;
+          const position = Math.max(2, Math.min(98, 100 * (angle - min) / (max - min)));
+          item.dot.style.left = position + "%";
+          if (angle < min || angle > max) severity = "outside";
+          else if (Math.min(angle - min, max - angle) <= 1.5) severity = "limit";
+          item.track.setAttribute("role", "meter");
+          item.track.setAttribute("aria-label", arm + " J" + (i + 1));
+          item.track.setAttribute("aria-valuemin", min);
+          item.track.setAttribute("aria-valuemax", max);
+          item.track.setAttribute("aria-valuenow", Math.max(min, Math.min(max, angle)));
+          item.track.setAttribute("aria-valuetext", angle.toFixed(1) + "度" + (severity ? "，接近或超出范围" : ""));
+        } else {
+          item.track.removeAttribute("role");
+          item.track.removeAttribute("aria-valuenow");
+        }
+        item.row.className = "joint" + (!known ? " unknown" : severity ? " " + severity : "");
+        item.row.title = severity === "outside" ? "超出本次软件范围" : severity === "limit" ? "距本次软件限位不超过 1.5°" : "";
+      });
+    }
+    function update(data) {
+      $("status").textContent = data.result;
+      $("status").className = "status" + (data.busy ? " busy" : /未完成|未通过|错误|损坏/.test(data.result) ? " error" : "");
+      $("anchor").textContent = data.anchor ? "软件起点：" + data.anchor.time : "尚未记录软件起点";
+      for (const arm of ["leader", "piper"]) {
+        const connected = data.connections?.[arm];
+        $(arm + "_status").textContent = connected === null ? "尚未检测" : connected ? "✓ 已连接" : "✕ 未连接";
+        renderJoints(arm, data);
+      }
+      $("joint-note").textContent = data.telemetry ? "实时反馈 · 红色为限位提醒" : "暂无新鲜反馈 · 当前角度显示 —";
+      $("log").textContent = (data.log || []).join("\n") || "暂无日志";
+      $("logfile").textContent = data.log_file || "";
+      $("detect_leader").disabled = data.busy;
+      $("detect_piper").disabled = data.busy;
+      $("prepare").disabled = data.busy || !data.connections?.leader || !data.connections?.piper;
+      $("live").disabled = data.busy || !data.preview_ready || !data.connections?.leader || !data.connections?.piper;
+      $("stop").disabled = !data.busy;
+    }
+    $("detect_leader").onclick = () => action("detect_leader", {port: $("port").value.trim(), can: $("can").value.trim()});
+    $("detect_piper").onclick = () => action("detect_piper", {port: $("port").value.trim(), can: $("can").value.trim()});
+    $("prepare").onclick = () => action("prepare", {port: $("port").value.trim(), can: $("can").value.trim(), gripper: $("gripper").checked});
+    $("live").onclick = () => action("live", {gripper: $("gripper").checked, seconds: Number($("seconds").value), confirmed: $("confirmed").checked});
+    $("stop").onclick = () => action("stop");
+    $("gripper").onchange = () => { $("message").textContent = "夹爪选项已改变，请重新准备遥操"; };
+    async function poll() {
+      try {
+        const response = await fetch("/api/status", {cache: "no-store"});
+        if (response.ok) update(await response.json());
+      } catch (error) {
+        $("status").textContent = "界面连接中断；请检查运行终端与实体急停";
+        $("status").className = "status error";
+      }
+    }
+    poll();
+    setInterval(poll, 1000);
+  </script>
+</body>
+</html>
