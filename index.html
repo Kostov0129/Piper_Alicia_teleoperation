@@ -156,10 +156,10 @@
           <button id="live" class="primary">启动遥操</button>
           <button id="stop" class="stop">退出遥操</button>
         </div>
+        <p class="subtle">启动后持续跟随，点击“退出遥操”结束；页面连接中断超过 8 秒会自动停止。</p>
         <p id="anchor" class="hint">尚未记录软件起点</p>
         <p class="subtle">退出按钮停止软件跟随，不是硬件急停。</p>
         <details><summary>设置与运行记录</summary>
-          <label>本次时长（秒） <input id="seconds" type="number" min="5" max="90" value="30"></label>
           <label>Alicia 串口 <input id="port" type="text" value="/dev/ttyACM0"></label>
           <label>PiPER CAN <input id="can" type="text" value="can0"></label>
           <p id="logfile" class="subtle"></p><pre id="log">暂无日志</pre>
@@ -277,14 +277,21 @@
     $("detect_leader").onclick = () => action("detect_leader", {port: $("port").value.trim(), can: $("can").value.trim()});
     $("detect_piper").onclick = () => action("detect_piper", {port: $("port").value.trim(), can: $("can").value.trim()});
     $("prepare").onclick = () => action("prepare", {port: $("port").value.trim(), can: $("can").value.trim(), gripper: $("gripper").checked, extended: $("extended").checked});
-    $("live").onclick = () => action("live", {gripper: $("gripper").checked, extended: $("extended").checked, seconds: Number($("seconds").value), confirmed: $("confirmed").checked});
+    $("live").onclick = () => action("live", {gripper: $("gripper").checked, extended: $("extended").checked, confirmed: $("confirmed").checked});
     $("stop").onclick = () => action("stop");
     $("gripper").onchange = () => { $("message").textContent = "夹爪选项已改变，请重新准备遥操"; };
     $("extended").onchange = () => { $("message").textContent = "行程选项已改变，请重新准备遥操"; $("live").disabled = true; };
     async function poll() {
       try {
         const response = await fetch("/api/status", {cache: "no-store"});
-        if (response.ok) update(await response.json());
+        if (response.ok) {
+          const data = await response.json();
+          update(data);
+          if (data.busy && data.kind === "live") {
+            await fetch("/api/heartbeat", {method: "POST",
+              headers: {"Content-Type": "application/json", "X-Local-Token": TOKEN}, body: "{}"});
+          }
+        }
       } catch (error) {
         $("status").textContent = "界面连接中断；请检查运行终端与实体急停";
         $("status").className = "status error";

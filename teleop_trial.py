@@ -91,6 +91,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--anchor", type=Path, default=Path(__file__).with_name("teleop_anchor.json"))
     ap.add_argument("--seconds", type=float, default=10.0)
+    ap.add_argument("--heartbeat-file", type=Path,
+                    help="Required for continuous live control; stale browser heartbeat stops following")
     ap.add_argument("--live", action="store_true", help="Switch PiPER to low-speed joint control")
     ap.add_argument("--with-gripper", action="store_true", help="Also follow Alicia trigger over PiPER's 0–70 mm gripper range")
     ap.add_argument("--shoulder-gain", type=float, default=GAIN,
@@ -98,8 +100,11 @@ def main():
     ap.add_argument("--mapping", type=Path, help="Experimental six-axis mapping JSON")
     ap.add_argument("--telemetry-file", type=Path, help="Current joint feedback for the local interface")
     args = ap.parse_args()
-    if not 1 <= args.seconds <= 90:
-        ap.error("试验时长必须为 1–90 秒")
+    if args.seconds == 0:
+        if not args.live or args.heartbeat_file is None:
+            ap.error("持续遥操必须由带页面心跳的本机界面启动")
+    elif not 1 <= args.seconds <= 90:
+        ap.error("限时试验必须为 1–90 秒")
     if not 0.5 <= args.shoulder_gain <= 1.0:
         ap.error("J2 映射增益必须在 0.5–1.0 之间")
     anchor = json.loads(args.anchor.read_text())
@@ -197,11 +202,18 @@ def main():
         command = actual[:]
         filtered = actual[:]
         grip_command = grip_actual if args.with_gripper else None
-        end = time.monotonic() + args.seconds
+        end = time.monotonic() + args.seconds if args.seconds else None
         previous = time.monotonic()
         last_print = 0.0
-        while time.monotonic() < end:
+        while end is None or time.monotonic() < end:
             now = time.monotonic()
+            if args.heartbeat_file is not None:
+                try:
+                    heartbeat_age = time.time() - args.heartbeat_file.stat().st_mtime
+                except OSError:
+                    heartbeat_age = float("inf")
+                if heartbeat_age > 8:
+                    raise RuntimeError("页面心跳中断超过 8 秒，已停止跟随")
             dt = min(now - previous, 0.2)
             previous = now
             if args.with_gripper:

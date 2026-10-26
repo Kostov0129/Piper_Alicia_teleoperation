@@ -27,6 +27,7 @@ MAPPING = ROOT / "matched_pose_trial_mapping_wider.json"
 MAPPING_EXTENDED = ROOT / "matched_pose_trial_mapping_extended.json"
 HTML = ROOT / "index.html"
 TELEMETRY = RUNTIME / "joints.json"
+HEARTBEAT = RUNTIME / "live-heartbeat"
 
 
 def joint_ranges(anchor, mapping_path=MAPPING):
@@ -164,7 +165,9 @@ class Controller:
         elif code == -signal.SIGINT:
             self.result = "已请求停止；请核对机械臂状态"
         else:
-            self.result = f"{self.kind} 未完成（退出码 {code}）；查看下方日志"
+            reason = next((line.removeprefix("RuntimeError: ") for line in reversed(tail(self.log_path))
+                           if line.startswith("RuntimeError: ")), None)
+            self.result = reason or f"{self.kind} 未完成（退出码 {code}）；查看下方日志"
         self.process = None
         self.kind = "idle"
         TELEMETRY.unlink(missing_ok=True)
@@ -248,9 +251,7 @@ class Controller:
                     raise ValueError("请先确认有人现场监护并能使用硬件急停")
                 if self.preview_fingerprint != key or time.monotonic() - self.preview_time > 120:
                     raise ValueError("请先以相同的起点、映射和夹爪选项重新通过只读预检")
-                seconds = body.get("seconds", 30)
-                if type(seconds) is not int or not 5 <= seconds <= 90:
-                    raise ValueError("遥操时长应为 5–90 秒")
+                seconds = 0
                 # A successful preview is single-use; repeat it before another live run.
                 self.preview_fingerprint = None
             else:
@@ -260,8 +261,17 @@ class Controller:
             if gripper:
                 command.append("--with-gripper")
             if kind == "live":
+                HEARTBEAT.touch()
+                command.extend(["--heartbeat-file", str(HEARTBEAT)])
                 command.append("--live")
             self._launch(kind, command, gripper)
+
+    def heartbeat(self):
+        with self.lock:
+            self._finish()
+            if self.kind != "live" or self.process is None:
+                raise ValueError("当前没有运行中的遥操")
+            HEARTBEAT.touch()
 
     def stop(self):
         with self.lock:
@@ -341,7 +351,7 @@ def make_handler(controller, token):
                 return self._json(403, {"error": "本机请求验证失败"})
             path = urlsplit(self.path).path
             if path not in ("/api/capture", "/api/prepare", "/api/detect_leader", "/api/detect_piper",
-                            "/api/preview", "/api/live", "/api/stop"):
+                            "/api/preview", "/api/live", "/api/stop", "/api/heartbeat"):
                 return self._json(404, {"error": "未知操作"})
             try:
                 size = int(self.headers.get("Content-Length", "0"))
@@ -352,6 +362,8 @@ def make_handler(controller, token):
                     raise ValueError("请求格式错误")
                 if path == "/api/stop":
                     controller.stop()
+                elif path == "/api/heartbeat":
+                    controller.heartbeat()
                 else:
                     controller.start(path.rsplit("/", 1)[1], body)
                 self._json(200, controller.status())
