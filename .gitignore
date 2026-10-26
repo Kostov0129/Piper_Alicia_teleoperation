@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 runtime/
+logs/
 *.log
 *anchor*.json
 *pairs*.json
