@@ -70,6 +70,12 @@
     .control .actions #prepare { grid-column: 1 / -1; }
     .control .actions #live { background: #15856f; color: white; }
     .control .actions #live:hover:not(:disabled) { background: #0d6e5b; }
+    .failure { border: 1px solid #efb9c1; border-left: 5px solid #cf4055; background: #fff1f2;
+      color: #8c2637; border-radius: 10px; padding: 11px 12px; line-height: 1.5; overflow-wrap: anywhere; }
+    .failure[hidden] { display: none; }
+    .failure strong { display: block; font-size: 14px; }
+    .failure p { margin: 5px 0 0; font-size: 12px; }
+    .failure .next { color: #613d45; }
     .option { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; line-height: 1.35; cursor: pointer; }
     .option input { width: 16px; height: 16px; margin: 1px 0 0; accent-color: #16836f; flex: none; }
     .hint { margin: 0; padding: 9px 10px; background: #f5f7fa; border-radius: 8px; color: #63738a; font-size: 12px; line-height: 1.45; }
@@ -156,6 +162,11 @@
           <button id="live" class="primary">启动遥操</button>
           <button id="stop" class="stop">退出遥操</button>
         </div>
+        <div id="failure" class="failure" role="alert" hidden>
+          <strong id="failure-title">这次未完成的原因</strong>
+          <p id="failure-detail"></p>
+          <p id="failure-next" class="next"></p>
+        </div>
         <p class="subtle">启动后持续跟随，点击“退出遥操”结束；页面连接中断超过 8 秒会自动停止。</p>
         <p id="anchor" class="hint">尚未记录软件起点</p>
         <p class="subtle">退出按钮停止软件跟随，不是硬件急停。</p>
@@ -183,6 +194,23 @@
   <script>
     const TOKEN = "__TOKEN__";
     const $ = id => document.getElementById(id);
+    let actionError = "";
+    function explainFailure(reason) {
+      if (/夹爪起点不一致/.test(reason)) return "调整 Alicia 夹爪，使它与 PiPER 当前开口接近后重新准备；只测试手臂时可取消夹爪控制。";
+      if (/Failed to fetch|无法连接本机服务/.test(reason)) return "确认程序仍在运行，并通过 http://127.0.0.1:8769/ 打开页面。";
+      if (/偏离起点|起点采样不稳定/.test(reason)) return "两臂停稳后重新点击“准备遥操”，记录新的软件起点。";
+      if (/心跳中断|连接中断/.test(reason)) return "确认本机页面保持打开、连接恢复后，重新检测并准备遥操。";
+      if (/跟踪误差/.test(reason)) return "检查 PiPER 是否受阻，重新准备后放慢示教臂动作；不要强行推臂。";
+      if (/连接失败|检测未通过|状态异常|反馈/.test(reason)) return "检查对应机械臂的电源、线缆与连接，再重新检测。";
+      if (/行程选项|夹爪选项|只读预检/.test(reason)) return "保持当前选项不变，重新点击“准备遥操”。";
+      return "请检查两臂状态后重试；需要更多细节可展开下方“设置与运行记录”。";
+    }
+    function showFailure(reason) {
+      $("failure").hidden = !reason;
+      $("failure-title").textContent = /选项已改变/.test(reason) ? "需要重新准备" : "这次未完成的原因";
+      $("failure-detail").textContent = reason;
+      $("failure-next").textContent = reason ? explainFailure(reason) : "";
+    }
     const jointRows = {};
     for (const arm of ["leader", "piper"]) {
       jointRows[arm] = Array.from({length: 6}, (_, i) => {
@@ -214,6 +242,7 @@
     }
     async function action(name, body = {}) {
       $("message").textContent = "";
+      actionError = "";
       try {
         const response = await fetch("/api/" + name, {
           method: "POST",
@@ -223,7 +252,10 @@
         const data = await response.json();
         if (!response.ok) throw Error(data.error || "操作失败");
         update(data);
-      } catch (error) { $("message").textContent = error.message; }
+      } catch (error) {
+        actionError = error.message === "Failed to fetch" ? "无法连接本机服务" : error.message;
+        showFailure(actionError);
+      }
     }
     function renderJoints(arm, data) {
       const values = data.telemetry?.[arm];
@@ -257,8 +289,13 @@
       });
     }
     function update(data) {
+      const failed = /未完成|未通过|错误|损坏|失败|异常|中断|不一致|超过|拒绝/.test(data.result);
+      const logReason = failed && (data.log || []).slice().reverse()
+        .map(line => line.match(/(?:RuntimeError|ValueError|OSError):\s*(.+)$/))
+        .find(match => match)?.[1];
+      showFailure(actionError || (failed ? logReason || data.result : ""));
       $("status").textContent = data.result;
-      $("status").className = "status" + (data.busy ? " busy" : /未完成|未通过|错误|损坏/.test(data.result) ? " error" : "");
+      $("status").className = "status" + (data.busy ? " busy" : failed || actionError ? " error" : "");
       $("anchor").textContent = data.anchor ? "软件起点：" + data.anchor.time : "尚未记录软件起点";
       for (const arm of ["leader", "piper"]) {
         const connected = data.connections?.[arm];
@@ -279,8 +316,8 @@
     $("prepare").onclick = () => action("prepare", {port: $("port").value.trim(), can: $("can").value.trim(), gripper: $("gripper").checked, extended: $("extended").checked});
     $("live").onclick = () => action("live", {gripper: $("gripper").checked, extended: $("extended").checked, confirmed: $("confirmed").checked});
     $("stop").onclick = () => action("stop");
-    $("gripper").onchange = () => { $("message").textContent = "夹爪选项已改变，请重新准备遥操"; };
-    $("extended").onchange = () => { $("message").textContent = "行程选项已改变，请重新准备遥操"; $("live").disabled = true; };
+    $("gripper").onchange = () => { actionError = "夹爪选项已改变，请重新准备遥操"; showFailure(actionError); $("live").disabled = true; };
+    $("extended").onchange = () => { actionError = "行程选项已改变，请重新准备遥操"; showFailure(actionError); $("live").disabled = true; };
     async function poll() {
       try {
         const response = await fetch("/api/status", {cache: "no-store"});
@@ -295,6 +332,7 @@
       } catch (error) {
         $("status").textContent = "界面连接中断；请检查运行终端与实体急停";
         $("status").className = "status error";
+        showFailure("界面连接中断，无法读取遥操状态");
       }
     }
     poll();
