@@ -96,6 +96,35 @@ class Controller:
         self.monitor_retry_after = 0.0
         self.port = "/dev/ttyACM0"
         self.can = "can0"
+        self.page_opened = False
+        self.last_page_ping = None
+        self.page_close_at = None
+
+    def page_open(self):
+        with self.lock:
+            self.page_opened = True
+            self.last_page_ping = time.monotonic()
+            self.page_close_at = None
+
+    def page_heartbeat(self):
+        with self.lock:
+            if not self.page_opened or self.page_close_at is not None:
+                raise ValueError("页面已关闭")
+            self.last_page_ping = time.monotonic()
+
+    def page_close(self):
+        with self.lock:
+            self.page_close_at = time.monotonic()
+            self.stop()
+            self._stop_monitor()
+
+    def page_expired(self):
+        with self.lock:
+            if not self.page_opened:
+                return False
+            now = time.monotonic()
+            return (self.page_close_at is not None and now - self.page_close_at > 2
+                    or self.last_page_ping is not None and now - self.last_page_ping > 5)
 
     def _stop_monitor(self):
         if self.monitor and self.monitor.poll() is None:
@@ -337,6 +366,7 @@ def make_handler(controller, token):
             if path == "/api/status":
                 return self._json(200, controller.status())
             if path == "/":
+                controller.page_open()
                 raw = HTML.read_text().replace("__TOKEN__", token).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -351,7 +381,8 @@ def make_handler(controller, token):
                 return self._json(403, {"error": "本机请求验证失败"})
             path = urlsplit(self.path).path
             if path not in ("/api/capture", "/api/prepare", "/api/detect_leader", "/api/detect_piper",
-                            "/api/preview", "/api/live", "/api/stop", "/api/heartbeat"):
+                            "/api/preview", "/api/live", "/api/stop", "/api/heartbeat",
+                            "/api/page-heartbeat", "/api/page-close"):
                 return self._json(404, {"error": "未知操作"})
             try:
                 size = int(self.headers.get("Content-Length", "0"))
@@ -364,6 +395,12 @@ def make_handler(controller, token):
                     controller.stop()
                 elif path == "/api/heartbeat":
                     controller.heartbeat()
+                elif path == "/api/page-heartbeat":
+                    controller.page_heartbeat()
+                    return self._json(200, {"ok": True})
+                elif path == "/api/page-close":
+                    controller.page_close()
+                    return self._json(200, {"ok": True})
                 else:
                     controller.start(path.rsplit("/", 1)[1], body)
                 self._json(200, controller.status())
@@ -386,6 +423,15 @@ def main():
     token = secrets.token_urlsafe(32)
     server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(controller, token))
     server.daemon_threads = True
+    def close_when_page_gone():
+        while True:
+            time.sleep(0.25)
+            if controller.page_expired():
+                controller.stop()
+                controller._stop_monitor()
+                server.shutdown()
+                return
+    threading.Thread(target=close_when_page_gone, daemon=True).start()
     print(f"本机界面：http://127.0.0.1:{args.port}/", flush=True)
     try:
         server.serve_forever()

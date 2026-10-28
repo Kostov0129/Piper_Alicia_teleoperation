@@ -167,7 +167,7 @@
           <p id="failure-detail"></p>
           <p id="failure-next" class="next"></p>
         </div>
-        <p class="subtle">启动后持续跟随，点击“退出遥操”结束；页面连接中断超过 8 秒会自动停止。</p>
+        <p class="subtle">启动后持续跟随；关闭网页会停止遥操并退出本机服务。重新使用时需再次运行 interface.py。</p>
         <p id="anchor" class="hint">尚未记录软件起点</p>
         <p class="subtle">退出按钮停止软件跟随，不是硬件急停。</p>
         <details><summary>设置与运行记录</summary>
@@ -324,17 +324,28 @@
         if (response.ok) {
           const data = await response.json();
           update(data);
+          await fetch("/api/page-heartbeat", {method: "POST",
+            headers: {"Content-Type": "application/json", "X-Local-Token": TOKEN}, body: "{}"});
           if (data.busy && data.kind === "live") {
             await fetch("/api/heartbeat", {method: "POST",
               headers: {"Content-Type": "application/json", "X-Local-Token": TOKEN}, body: "{}"});
           }
         }
       } catch (error) {
-        $("status").textContent = "界面连接中断；请检查运行终端与实体急停";
+        $("status").textContent = location.protocol === "file:"
+          ? "请先运行 interface.py，再打开 http://127.0.0.1:8769/；不要直接打开 index.html"
+          : "界面连接中断；请检查运行终端与实体急停";
         $("status").className = "status error";
-        showFailure("界面连接中断，无法读取遥操状态");
+        showFailure(location.protocol === "file:"
+          ? "当前是本地 HTML 文件，无法连接遥操服务"
+          : "界面连接中断，无法读取遥操状态");
       }
     }
+    window.addEventListener("pagehide", () => {
+      fetch("/api/page-close", {method: "POST", keepalive: true,
+        headers: {"Content-Type": "application/json", "X-Local-Token": TOKEN}, body: "{}"})
+        .catch(() => {});
+    });
     poll();
     setInterval(poll, 1000);
   </script>
