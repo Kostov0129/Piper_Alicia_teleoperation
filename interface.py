@@ -97,23 +97,28 @@ class Controller:
         self.port = "/dev/ttyACM0"
         self.can = "can0"
         self.page_opened = False
+        self.active_page_id = None
         self.last_page_ping = None
         self.page_close_at = None
 
     def page_open(self):
         with self.lock:
             self.page_opened = True
+            self.active_page_id = secrets.token_urlsafe(16)
             self.last_page_ping = time.monotonic()
             self.page_close_at = None
+            return self.active_page_id
 
-    def page_heartbeat(self):
+    def page_heartbeat(self, page_id):
         with self.lock:
-            if not self.page_opened or self.page_close_at is not None:
+            if page_id != self.active_page_id or self.page_close_at is not None:
                 raise ValueError("页面已关闭")
             self.last_page_ping = time.monotonic()
 
-    def page_close(self):
+    def page_close(self, page_id):
         with self.lock:
+            if page_id != self.active_page_id:
+                return
             self.page_close_at = time.monotonic()
             self.stop()
             self._stop_monitor()
@@ -366,8 +371,9 @@ def make_handler(controller, token):
             if path == "/api/status":
                 return self._json(200, controller.status())
             if path == "/":
-                controller.page_open()
-                raw = HTML.read_text().replace("__TOKEN__", token).encode()
+                page_id = controller.page_open()
+                raw = (HTML.read_text().replace("__TOKEN__", token)
+                       .replace("__PAGE_ID__", page_id)).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Cache-Control", "no-store")
@@ -396,10 +402,10 @@ def make_handler(controller, token):
                 elif path == "/api/heartbeat":
                     controller.heartbeat()
                 elif path == "/api/page-heartbeat":
-                    controller.page_heartbeat()
+                    controller.page_heartbeat(body.get("page_id"))
                     return self._json(200, {"ok": True})
                 elif path == "/api/page-close":
-                    controller.page_close()
+                    controller.page_close(body.get("page_id"))
                     return self._json(200, {"ok": True})
                 else:
                     controller.start(path.rsplit("/", 1)[1], body)

@@ -193,6 +193,7 @@
   </main>
   <script>
     const TOKEN = "__TOKEN__";
+    const PAGE_ID = "__PAGE_ID__";
     const $ = id => document.getElementById(id);
     let actionError = "";
     function explainFailure(reason) {
@@ -325,7 +326,8 @@
           const data = await response.json();
           update(data);
           await fetch("/api/page-heartbeat", {method: "POST",
-            headers: {"Content-Type": "application/json", "X-Local-Token": TOKEN}, body: "{}"});
+            headers: {"Content-Type": "application/json", "X-Local-Token": TOKEN},
+            body: JSON.stringify({page_id: PAGE_ID})});
           if (data.busy && data.kind === "live") {
             await fetch("/api/heartbeat", {method: "POST",
               headers: {"Content-Type": "application/json", "X-Local-Token": TOKEN}, body: "{}"});
@@ -343,7 +345,8 @@
     }
     window.addEventListener("pagehide", () => {
       fetch("/api/page-close", {method: "POST", keepalive: true,
-        headers: {"Content-Type": "application/json", "X-Local-Token": TOKEN}, body: "{}"})
+        headers: {"Content-Type": "application/json", "X-Local-Token": TOKEN},
+        body: JSON.stringify({page_id: PAGE_ID})})
         .catch(() => {});
     });
     poll();
